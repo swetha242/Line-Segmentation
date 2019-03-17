@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import pickle
 
 #100 is width of strip
 s_width = 100
@@ -18,15 +19,64 @@ def preprocessImage(image):
 
 
 
-def calcThresholds():
+def calcThresholds(strips):
+    mid=len(strips)//2
+    (rows1,cols1)=strips[mid].shape
+    strip_mid=strips[mid]
+    #print(strip_mid)
+    tot_count_w = 0
+    count_whitepx=[]
+    for i in range(1,rows1-1):
+        count_w = 0
+        for j in range(cols1):
+            vals = strip_mid[i][j]
+            if(vals == 255): #Look for white pixels
+                count_w = count_w +1
+        tot_count_w+=count_w
+        count_whitepx.append(count_w)
+    #max no of pixel vals in a line to qualify as empty line
+    count_thres=tot_count_w//rows1
     #200 is width of strip
     s_width = 100
-    s_cnt = 5
+    seen=False
+    min_space=0
+    min_spaces=[]
+    first_line=True
+    word_ht=0
+    sum_word_ht=0
+    word_hts=[]
+    no_words=0
+    for i in range(1,rows1-1):
+        if(count_whitepx[i-1]<=count_thres):
+            if(not seen):
+                seen=True
+                min_space=0
+            else:
+                min_space+=1
+            if not first_line and word_ht>10:
+                #print("word ht",word_ht)
+                sum_word_ht+=word_ht
+                word_hts.append(word_ht)
+                word_ht=0
+                no_words+=1
+                first_line=True
+        else:
+            if(min_space!=0):
+                min_spaces.append(min_space)
+                min_space=0
+                seen=False
+            if first_line:
+                first_line=False
+            word_ht+=1
+    min_spaces.sort()
+    space_thres=min_spaces[round(0.5*len(min_spaces))]//2
+    avg_word_ht=sum_word_ht//no_words
+    word_hts.sort()
+    avg_word_ht=word_hts[round(0.25*len(word_hts))]
+    s_cnt = count_thres
     #min gap between two lines
-    space_thres  = 10
-    #max no of pixel vals in a line to qualify as empty line
-    count_thres = 5
-
+    #space_thres  = 10
+    return s_width,space_thres,count_thres,avg_word_ht
 
 def obtainStrips(image):
     (rows,cols)=image.shape
@@ -48,6 +98,7 @@ def segmentStrips(strips):
         (rows1,cols1)=simg.shape
         x=[]
         count_strip = [] # Count the white px for each row of a strip
+        seen=False
         for i in range(1,rows1-1):
             count_w = 0
             nxt_cnt_w = 0
@@ -68,7 +119,11 @@ def segmentStrips(strips):
                 '''if(len(x)!=0):
                     if(x[len(x)-1]==i-1):
                         x.pop()'''
-                x.append(i)      	
+                if(not seen):
+                    x.append(i)
+                    seen=True
+            else:
+                seen=False
         count_arr.append(count_strip)
         gaps_arr.append(x)
     
@@ -81,13 +136,20 @@ def segmentStrips(strips):
         y=[]
         for gap_i in range(0,len(gfs)-1):
             space_diff = gfs[gap_i+1] - gfs[gap_i]
+            if(gap_i!=0 and len(y)!=0):
+                gap_diff=gfs[gap_i]-y[len(y)-1]+space_diff//2
+                if(gap_diff<avg_word_ht):
+                    continue
+                elif(space_diff>space_thres):
+                    mid_pt = gfs[gap_i] + space_diff//2
+                    y.append(mid_pt)
             if(space_diff>space_thres):
                 mid_pt = gfs[gap_i] + space_diff//2
                 y.append(mid_pt)
         mid_arr.append(y)
 
-    print(gaps_arr[1])
-    print(mid_arr[1])
+    #print(gaps_arr[1])
+    #print(mid_arr[1])
 
     final_px = []
     # j is indiv strip no
@@ -143,12 +205,21 @@ def combineStrips(final_px , mid_arr):
         nnn_img = np.array(n_img)
         cv2.imwrite('op/fl.jpg' ,nnn_img)
 
-
-image = cv2.imread('images/99D1.jpg')
-im = cv2.imread('images/99D1.jpg')
-image = preprocessImage(image)
-strips = obtainStrips(image)
-
-image , final_px , mid_arr = segmentStrips(strips)
-cv2.imwrite('op/99D1.jpg',image)
+images=[2,3,4,5,6,7,8,9,10]
+for im_no in images:
+    if(im_no==3):
+        image = cv2.imread('images/'+str(im_no)+'.jpg')
+        im = cv2.imread('images/'+str(im_no)+'.jpg')
+        image = preprocessImage(image)
+        '''strips = obtainStrips(image)
+        pickle_out = open(str(im_no)+".pickle","wb")
+        pickle.dump(strips, pickle_out)
+        pickle_out.close()
+        '''
+        pickle_in = open(str(im_no)+".pickle","rb")
+        strips = pickle.load(pickle_in)
+        s_width,space_thres,count_thres,avg_word_ht=calcThresholds(strips)
+        print(space_thres)
+        image , final_px , mid_arr = segmentStrips(strips)
+        cv2.imwrite('op/'+str(im_no)+"_thr1.jpg",image)
 
